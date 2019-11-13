@@ -10,45 +10,52 @@ The data output by LabelImg should be in `YOLO` format, on which the `denormaliz
 output format, a separate function will need to be written to parse the files and extract bounding box coordinates. 
 
 ## Usage
+All parameters for training/testing can be configured in `config.ini` file. 
 ```python
-#### defining important parameters:
+# NOTE: comment out the `training` or `load pretrained` as per requirement. 
 
-# define the size to which each crop of a bounding box is resized; the size
-# should be square
-resize_to=(224, 224)
 
-# define the class mapping 
-class_dict={0: 'Vertical Relational',
-            1: 'Horizontal Entity',
-            2: 'Multiline Text',
-            3: 'Other Tabular',
-            4: 'Header',
-            5: 'Other',
-            6: 'Logo'}
+########################## get config
+config = Config()
+config.create_config('config.ini')
 
-# define the subset of labels to be used in training (this feature is used
-# in case of class imbalance or when very few examples of a particular class
-# are found in the data)
-use_labels=[0, 1, 2, 3, 5, 6]
-
-# NOTE: the above parameters are default for read_train_data()
-
-#### main script:
 cc = ContainerClassifier()
-cc.read_train_data(path='./annotated_data', resize_to=resize_to, 
-                                            class_dict=class_dict, 
-                                            use_labels=use_labels)
 
-cc.train(model='resnet101', epochs=30, batch_size=4)
-cc.save_model(name='resnet101_nopretrained_30epochs_224x224')
 
-# uncomment if loading previously trained model:
-# cc.load_model('./models/container_classifier_v1_0_0.json',
-#                 './models/container_classifier_v1_0_0.h5')
+######################### training 
 
-# testing
-cc.read_test_data(path='./test', resize_to=(224, 224))
-cc.test_model(output_dir='test_output')  
+cc.read_train_data(path=config.train_data_folder_path, 
+	           resize_to=config.resize_to, 
+	           class_dict=config.class_dict, 
+	           use_labels=config.use_labels)
+
+cc.train(model=config.architecture, 
+         epochs=config.epochs, 
+         batch_size=config.batch_size, 
+         optimizer=config.optimizer, 
+         summary=config.print_model_summary)
+
+cc.save_model(name=config.model_name, 
+	      path=config.save_to_dir)
+
+
+
+######################### load pretrained
+cc.load_model(json_path=config.load_from_dir+'.json', 
+	      weights_path=config.load_from_dir+'.h5')
+
+
+
+######################### testing
+cc.read_test_data(path=config.test_data_folder_path, 
+	          resize_to=config.resize_to, 
+	          class_dict=config.class_dict, 
+	          use_labels=config.use_labels)
+
+cc.test_model(output_dir=config.test_output_dir, 
+	      top_k=config.top_k, 
+	      plot_outputs=config.plot_outputs)
+
 
 ```
 ## Output
@@ -68,31 +75,31 @@ cc.test_model(output_dir='test_output')
 ```python
 Classification Report:
 
-			      	      precision    recall  f1-score   support
+			    	      precision    recall  f1-score   support
 
-	vertical relational   0            0.91      1.00      0.95        10
-	horizontal entity     1            0.89      0.89      0.89         9
-	multiline text	      2            1.00      0.81      0.90        16
-	other tabular	      3            0.00      0.00      0.00         1
-	other		      4            0.56      1.00      0.71         5
-	logo	              5            1.00      0.67      0.80         3
+	vertical relational	   0       0.83      0.89      0.86        54
+	horizontal entity	   1       0.97      0.82      0.89        39
+	multiline text		   2       0.98      0.92      0.95       105
+	other tabular		   3       0.68      0.62      0.65        24
+	other		  	   4       0.61      0.91      0.73        33
+	logo		  	   5       0.67      0.40      0.50        15
 
+			    accuracy                           0.84       270
+			   macro avg       0.79      0.76      0.76       270
+			weighted avg       0.86      0.84      0.84       270
 
-                             accuracy                          0.86        44
-                            macro avg      0.73      0.73      0.71        44
-                         weighted avg      0.88      0.86      0.86        44
-
+ 
 
 Confusion Matrix:
 
-[[10  0  0  0  0  0]       0: vertical relational
- [ 0  8  0  0  1  0]	   1: horizontal entity	
- [ 1  0 13  0  2  0]	   2: multiline text
- [ 0  1  0  0  0  0]	   3: other tabular
- [ 0  0  0  0  5  0]	   4: other
- [ 0  0  0  0  1  2]]	   5: logo
- 
- ```
+[[48  1  0  4  1  0]    0: vertical relational
+ [ 4 32  0  3  0  0]    1: horizontal entity
+ [ 0  0 97  0  8  0]    2: multiline text
+ [ 6  0  2 15  1  0]    3: other tabular
+ [ 0  0  0  0 30  3]    4: other
+ [ 0  0  0  0  9  6]]   5: logo
+
+```
  
  ### Sample Output Images
  1. Vertical Relational Table: <br><br>
