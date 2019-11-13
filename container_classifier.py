@@ -1,6 +1,7 @@
 import os
 from collections import Counter
 import random
+import configparser
 import cv2
 import pandas as pd
 import numpy as np
@@ -12,15 +13,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 from keras.models import load_model, model_from_json
 
 class ContainerClassifier():
-    '''
-        This class reads in .jpg images of scanned text documents along with
-        .txt files having the coordinates of bounding boxes along with labels.
-        The labeling can be performed using annotation tools like LabelImg which
-        can be found here: https://github.com/tzutalin/labelImg. The .txt files
-        should be output as YOLO files from the LabelImg tool.
-
-        This class further trains a Deep Learning model of choice and tests it.
-    '''
     def __init__(self):
         self.label_map = None
         self.train_data = None
@@ -34,29 +26,29 @@ class ContainerClassifier():
 
     ########################## private methods #################################
     def _read_paths(self, folder_path):
-
+        
         '''
         Reads both yolo txt and jpg files in given path
-
+        
         Args:
             path to folder
-
+        
         Returns:
             list of tuples: [(path/img_name.txt, path/img_name.jpg)]
         '''
-
+        
         for root, dirs, files in os.walk(folder_path):
             root_path = root
             file_list = files
-
+        
         # separate out txt file names and acquire txt file names accordingly
         jpg_files = [file for file in file_list if file.endswith('.jpg')]
-        txt_files = [jpg_file_name[:-4] + '.txt' for jpg_file_name in jpg_files]
-
+        txt_files = [jpg_file_name[:-4] + '.txt' for jpg_file_name in jpg_files]    
+        
         # add root path in front of file name
         txt_files = [root_path + '/' + file_name for file_name in txt_files]
         jpg_files = [root_path + '/' + file_name for file_name in jpg_files]
-
+        
         data_path_listoftuples = []
         for item in zip(txt_files, jpg_files):
             data_path_listoftuples.append(item)
@@ -64,20 +56,10 @@ class ContainerClassifier():
         random.shuffle(data_path_listoftuples)
 
         return data_path_listoftuples
-
+    
 
     def _denormalize(self, size, box):
-        '''
-            Method to denormalize the coordinates output by LabelImg.
-
-            Args:
-                size: list, [width, height] of image
-
-                box_list: list, [x, y, w, h] from LabelImg
-
-            Returns:
-                list, denormalized [xmin, ymin, xmax, ymax]
-        '''
+        # size list[width, height] of image, box list[x,y,w,h] from LabelImg
         x = box[0]
         y = box[1]
         w = box[2]
@@ -88,30 +70,25 @@ class ContainerClassifier():
         w = w*size[0]
         h = h*size[1]
 
+
         x1 = (2*x-w)/2.0
         y1 = (2*y-h)/2.0
         x3 = (2*x+w)/2.0
         y3 = (2*y+h)/2.0
-
+        
         return [int(x1),int(y1), int(x3),int(y3)]
 
-
-    def _create_data(self, data_path_listoftuples, resize_to,
-                     use_labels=None, training=True):
-        '''
+    def _create_data(self, data_path_listoftuples, resize_to, 
+                     use_labels, training=True): 
+        
+        ''' 
         Function to implement the logic for creating dataset.
 
         Args:
-            data_path_listoftuples: list of tuples -
+            data_path_listoftuples: list of tuples - 
                                     [(path/img_name.txt, path/img_name.jpg)]
 
-            resize_to: tuple, shape tuple to resize training images to
-
-            use_labels: list, labels to be used during training, None by default
-                        (this option can be used to disregard labels with very
-                         few training examples)
-
-             training: bool, flag for training; true by default
+            resize_to: tuple
 
         Returns:
             data_array
@@ -123,8 +100,8 @@ class ContainerClassifier():
         original_sizes = []
 
         # if training:
-        # dict to reindex arbitrary labels to sequential mapping starting
-        # from 0 to len(use_labels)
+            # dict to reindex arbitrary labels to sequential mapping starting 
+            # from 0 to len(use_labels)
         mapping_dict = {i: k for k, i in enumerate(use_labels)}
         self.label_map = mapping_dict
 
@@ -138,41 +115,43 @@ class ContainerClassifier():
 
                     # 1st item of the line is the index of label,
                     # the rest are coordinates
+
                     float_list = [float(coordinate) for coordinate in \
                                     line[1:].split()]
 
                     label = float(line[0])
 
-                    xmin, ymin, xmax, ymax = self._denormalize((width, height),
+                    xmin, ymin, xmax, ymax = self._denormalize((width, height), 
                                                                 float_list)
-                    if label in use_labels:
-                        img_crop = img[ymin:ymax, xmin:xmax]
 
+                    if label in use_labels:
+                        
+                        img_crop = img[ymin:ymax, xmin:xmax]
+                        
                         if not training:
                             original_sizes.append(img_crop)
 
-                        WHITE = [255, 255, 255]
-
-                        # copyMakeBorder(image, top, bottom, left, right, color):
-                        # top, bottom, left, right are the number of pixels on
+                        #copyMakeBorder(image, top, bottom, left, right, color):
+                        # top, bottom, left, right are the number of pixels on 
                         # respective side to add blank border to
-
-                        # uncomment the following line to pad crops of bounding-
-                        # boxes such that position of crop in the image is
-                        # retained:
-
+                        WHITE = [255, 255, 255]
                         # image = cv2.copyMakeBorder(img_crop, ymin, height-ymax, 
                         #                             xmin, width-xmax,
                         #                             cv2.BORDER_CONSTANT,
                         #                             value=WHITE)
-                        image = cv2.resize(img_crop, resize_to)
 
+                        # cv2.imwrite('./img.jpg', image)
+                       
+                        image = cv2.resize(img_crop, tuple(resize_to))
+                        
+                        # cv2.imwrite('./resized.jpg', image)
+                        
                         data_list.append(image)
                         label_list.append(self.label_map[label])
-
+        
         label_arr = np.array(label_list)
         data_arr = np.array(data_list)
-
+        
         # convert labels to one hot and save binarizer for testint
         if training:
             lb = LabelBinarizer()
@@ -188,23 +167,23 @@ class ContainerClassifier():
 
 
     ########################### public methods #################################
-
-    def read_train_data(self, path, resize_to=(512, 512),
-                        class_dict={0: 'Vertical Relational',
-                                    1: 'Horizontal Entity',
-                                    2: 'Multiline Text',
-                                    3: 'Other Tabular',
-                                    4: 'Header',
-                                    5: 'Other',
-                                    6: 'Logo'},
+    
+    def read_train_data(self, path, resize_to=(512, 512),  
+                        class_dict={0: 'Vertical Relational', 
+                                    1: 'Horizontal Entity', 
+                                    2: 'Multiline Text', 
+                                    3: 'Other Tabular', 
+                                    4: 'Header', 
+                                    5: 'Other', 
+                                    6: 'Logo'}, 
                         use_labels=[0, 1, 2, 3, 5, 6]):
-        # takes path to training data folder
+        # takes path to training data folder 
         '''
         Args:
-            path:
+            path: 
                 path to training data folder having:
-                    - img_name.txt, containing labels and coordinates of
-                      containers
+                    - img_name.txt, containing labels and coordinates of 
+                      containers 
                     - img_name.jpg
 
             resize_to:
@@ -213,21 +192,21 @@ class ContainerClassifier():
             use_labels:
                 the labels to use from img_name.txt
 
-                lables as defined in predefined_classes.txt in labelImg
-
+                lables as defined in predefined_classes.txt in labelImg 
+                       
                 |      class         |   label    |
                 |--------------------|------------|
                 | vertical relational|      0     |
                 | horizontal entity  |      1     |
-                | multiline text     |      2     |
-                | other tabular      |      3     |
-                | header             |      4     |
-                | other              |      5     |
+                | multiline text     |      2     |  
+                | other tabular      |      3     |  
+                | header             |      4     |  
+                | other              |      5     |  
                 | logo               |      6     |
-
-
+    
+        
         Returns:
-            None. Saves the train data and labels array as properties of the
+            None. Saves the train data and labels array as properties of the 
             class.
         '''
         print('Loading training data...')
@@ -237,35 +216,33 @@ class ContainerClassifier():
         data_path_listoftuples = self._read_paths(path)
 
         # create training data and save it as class property
-        data_arr, label_arr = self._create_data(data_path_listoftuples,
-                                                      resize_to,
+        data_arr, label_arr = self._create_data(data_path_listoftuples, 
+                                                      resize_to, 
                                                       use_labels)
 
-        data_arr = data_arr/255.0
+        data_arr = data_arr/255.0                                                      
         self.train_data = data_arr
         self.train_labels = label_arr
         self.resize_to = resize_to
 
 
     def read_test_data(self, path, resize_to=(512, 512),
-                                   class_dict={0: 'Vertical Relational',
-                                               1: 'Horizontal Entity',
-                                               2: 'Multiline Text',
-                                               3: 'Other Tabular',
-                                               4: 'Header',
-                                               5: 'Other',
-                                               6: 'Logo'},
+                                   class_dict={0: 'Vertical Relational', 
+                                               1: 'Horizontal Entity', 
+                                               2: 'Multiline Text', 
+                                               3: 'Other Tabular', 
+                                               4: 'Header', 
+                                               5: 'Other', 
+                                               6: 'Logo'}, 
                                     use_labels=[0, 1, 2, 3, 5, 6]):
 
         '''
         Args:
-            path:
+            path: 
                 path to training data folder having:
-                    - img_name.txt, containing labels and coordinates of
-                      containers
-                    - img_name.jpg
-
-            Rest of the arguments are same as read_train_data() method.
+                    - img_name.txt, containing labels and coordinates of 
+                      containers 
+                    - img_name.jpg 
 
         Returns:
             None, saves the test data and labels as class properties
@@ -279,91 +256,91 @@ class ContainerClassifier():
 
         # create testing data and save it as class property
         data_arr, label_arr, original_sizes = self._create_data(
-                                                        data_path_listoftuples,
+                                                        data_path_listoftuples, 
                                                         self.resize_to,
-                                                        use_labels=use_labels,
+                                                        use_labels=use_labels, 
                                                         training=False)
+        
         data_arr = data_arr/255.0
         self.test_data = data_arr
         self.test_labels = label_arr
         self.original_sizes = original_sizes
 
 
-    def train(self, model, epochs=5, batch_size=10, optimizer='adam',
+    def train(self, model, epochs=5, batch_size=10, optimizer='adam', 
                 summary=True):
+        
         '''
         Args:
-            model:
-                Pass as None if using pretrained model.
-                'model_name' if training from scratch. One of:
-                                                        - resnet101
-                                                        - resnet50
-                                                        - resnet152
-                                                        - densenet121
+            model: 
+                None if using pretrained model
+                'model_name' if training
 
             summary:
                 bool, whether to print out model summary
         '''
+
         # get input shape of resized images and add the channels dimension
         input_shape = list(self.resize_to)
         input_shape.append(3)
         shape_tuple = tuple(input_shape)
 
         if model == 'pretrained':
+
             model = self.model
 
         elif model == 'resnet101':
-            model = keras.applications.resnet.ResNet101(include_top=True,
-                                                        weights=None,
-                                                        input_tensor=None,
-                                                        input_shape=None,
-                                                        pooling=None,
+            model = keras.applications.resnet.ResNet101(include_top=True, 
+                                                        weights=None, 
+                                                        input_tensor=None, 
+                                                        input_shape=shape_tuple, 
+                                                        pooling=None, 
                                                         classes=\
                                                             len(self.label_map))
 
         elif model == 'densenet121':
-            model = keras.applications.densenet.DenseNet121(include_top=True,
-                                                            weights=None,
-                                                            input_tensor=None,
+            model = keras.applications.densenet.DenseNet121(include_top=True, 
+                                                            weights=None, 
+                                                            input_tensor=None, 
                                                             input_shape=\
-                                                                shape_tuple,
-                                                            pooling=None,
+                                                                shape_tuple, 
+                                                            pooling=None, 
                                                             classes=\
                                                             len(self.label_map))
 
         elif model == 'resnet50':
-            model = keras.applications.resnet.ResNet50(include_top=True,
-                                                       weights=None,
-                                                       input_tensor=None,
-                                                       input_shape=shape_tuple,
-                                                       pooling=None,
+            model = keras.applications.resnet.ResNet50(include_top=True, 
+                                                       weights=None, 
+                                                       input_tensor=None, 
+                                                       input_shape=shape_tuple, 
+                                                       pooling=None, 
                                                        classes=\
                                                            len(self.label_map))
 
         elif model == 'resnet152':
-            model = keras.applications.resnet.ResNet152(include_top=True,
-                                                        weights=None,
-                                                        input_tensor=None,
-                                                        input_shape=shape_tuple,
-                                                        pooling=None,
+            model = keras.applications.resnet.ResNet152(include_top=True, 
+                                                        weights=None, 
+                                                        input_tensor=None, 
+                                                        input_shape=shape_tuple, 
+                                                        pooling=None, 
                                                         classes=\
                                                             len(self.label_map))
 
-        else:
+        else: 
             raise ValueError('Please Enter valid model name one of:\
                 "resnet50", "resnet101", "resnet152", "densenet121"')
 
-        model.compile(loss='categorical_crossentropy', optimizer=optimizer,
+        model.compile(loss='categorical_crossentropy', optimizer=optimizer, 
                         metrics=['accuracy'])
 
         if summary:
-            print(model.summary())
+            print(model.summary())                                                                                            
 
-        print(' ')
+        print(' ')                                                                                                        
         print('Training on {} examples...'.format(self.train_labels.shape[0]))
         print('-'*100)
 
-        model.fit(self.train_data, self.train_labels, batch_size=batch_size,
+        model.fit(self.train_data, self.train_labels, batch_size=batch_size, 
                     epochs=epochs, verbose=1, shuffle=True)
 
         print(' ')
@@ -371,65 +348,43 @@ class ContainerClassifier():
 
         # save model as property
         self.model = model
-
-
+        
     def save_model(self, name, path='./'):
-        '''
-            Saves trained model at given path
-        '''
+        
         print(' ')
         print('Saving Model...')
         print(' ')
         # serialize model to JSON
         model_json = self.model.to_json()
-
+        
         with open(path + name + '.json', "w") as json_file:
             json_file.write(model_json)
-
+            
         # serialize weights to HDF5
         self.model.save_weights(path + name + '.h5')
         print("Saved model to disk")
-
+        
 
     def load_model(self, json_path, weights_path):
-        '''
-            Args:
-                json_path: path to json file comprising the model architecture
-
-                weights_path: path to h5 file having the weights of a
-                                previously trained model
-
-            Returns:
-                None, attaches the loaded model as the class property
-                'self.model' on which the self.test_model() method can be called
-
-        '''
+        
         # load json and create model
         json_file = open(json_path, 'r')
-
+        
         loaded_model_json = json_file.read()
         json_file.close()
 
         loaded_model = model_from_json(loaded_model_json)
-
+        
         # load weights into new model
         loaded_model.load_weights(weights_path)
-
+        
         print("Loaded model from disk")
 
         self.model = loaded_model
 
 
-    def test_model(self, output_dir='test_output'):
+    def test_model(self, output_dir='test_output', top_k=3, plot_outputs=False):
 
-        '''
-            Function to print classification metrics and output crops of
-            classified bounding-boxes along with label written on them.
-
-            Args:
-                output_dir: '/path/to/folder', where crops are output along with
-                            labeling
-        '''
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -443,6 +398,16 @@ class ContainerClassifier():
         print('-'*100)
 
         preds = model.predict(data)
+
+        # for top-k predictions
+        for pred_arr in preds:
+            ind = np.argpartition(pred_arr, -top_k)[-top_k:]
+            top_k_probs = pred_arr[ind]
+            top_k_classes = ind
+            top_k_dict = dict(zip(top_k_classes, top_k_probs))
+            print(top_k_dict)
+
+        # for most confident prediction, the metrics are calculated for these
         preds = np.argmax(preds, axis=1)
 
         print(' ')
@@ -457,31 +422,176 @@ class ContainerClassifier():
         # invert label dictionary
         inv_label_map = {v: k for k, v in self.label_map.items()}
 
-        count = 1
-        for img, pred in zip(og_sizes, preds):
-            cv2.putText(img, self.class_dict[inv_label_map[pred]],
-                        (0, int(img.shape[0])),
-                        cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
-            cv2.imwrite('./' + output_dir + '/' + str(count) + '.jpg', img)
-            count += 1
+        if plot_outputs:
+            count = 1
+            for img, pred in zip(og_sizes, preds):
+                cv2.putText(img, self.class_dict[inv_label_map[pred]], 
+                            (0, int(img.shape[0])), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 2)
+                cv2.imwrite('./' + output_dir + '/' + str(count) + '.jpg', img)
+                count += 1        
 
 
 
-# =========================== example use ==================================== #
+class Config(configparser.ConfigParser):
+
+    '''
+        Class that inherits from ConfigParser and makes accessing parameters
+        from the config file easy.
+
+        Methods:
+            create_config(path):
+                Takes the path of the `config.ini` file and saves parameters
+                as class objects
+
+            _test_confit():
+                Private method to ensure validity of config parameters.
+    '''
+
+    def __init__(self):
+        configparser.ConfigParser.__init__(self)
+        self.classes = None
+        self.use_labels = None
+        self.resize_to = None
+        self.architecture = None
+        self.epochs = None
+        self.batch_size = None
+        self.optimizer = None
+        self.print_model_summary = None
+        self.model_name = None
+        self.save_to_dir = None
+        self.load_from_dir = None
+        self.test_data_folder_path = None
+        self.test_output_dir = None
+        self.top_k = None
+        self.plot_outputs = None
+        self.class_dict = None
+
+    def create_config(self, path):
+        self.read(path)
+        
+        # train specs
+        self.train_data_folder_path = self['train specs']['TrainDataFolderPath']
+        self.classes = \
+            list(map(str.lstrip, self['train specs']['Classes'].split(',')))
+        self.use_labels = \
+            list(map(str.lstrip, self['train specs']['UseLabels'].split(',')))
+        self.resize_to = \
+            list(map(int, self['train specs']['ResizeTo'].split(',')))    
+        self.epochs = int(self['train specs']['Epochs'])
+        self.batch_size = int(self['train specs']['BatchSize'])
+        
+        # model params
+        self.architecture = self['model params']['ModelArchitecture']
+
+        self.optimizer = self['model params']['Optimizer']
+        self.print_model_summary = bool(self['model params']\
+            ['PrintModelSummary'])
+
+        # load model
+        self.model_name = self['save/load model']['ModelName']
+        self.save_to_dir = self['save/load model']['SaveToDir']
+        self.load_from_dir = self['save/load model']['LoadFromDir']
+
+        # test specs
+        self.test_data_folder_path = self['test specs']['TestDataFolderPath']
+        self.test_output_dir = self['test specs']['TestOutputDir']
+        self.top_k = int(self['test specs']['TopK'])
+        self.plot_outputs = bool(self['test specs']['PlotOutputs'])
+        
+        # convert the classes list to dict
+        self.class_dict = {k:v for k,v in enumerate(config.classes)}
+
+        # call the tests to ensure validity of parameters passed
+        self._test_config()
+
+        # we map the class labels in self.use_labels to class indices using the
+        # self.class_dict
+        inv_class_dict = self._invert_dict(self.class_dict)
+        self.use_labels = [inv_class_dict[i] for i in self.use_labels]
+
+
+    def _invert_dict(self, dct):
+        return {v:k for k,v in dct.items()}
+
+    def _test_config(self):
+        
+        # test train specs
+        assert len(set(self.use_labels) - set(self.classes)) == 0,\
+            '''`UseLabels` must be a subset of `Classes`. 
+        Received UseLabels: {}
+        Received Classes: {}'''.format(self.use_labels, self.classes)
+
+        assert len(self.use_labels) != 0, \
+                'UseLabels cannot be empty.'
+
+        assert self.resize_to[0] == self.resize_to[1], \
+            '''The shape tuple passed to ResizeTo should be square.
+            Received shape: {}'''.format(self.resize_to)
+
+        # test model params
+        possible_models = ['resnet101', 'resnet50', 'densenet121', 'resnet152']
+        assert self.architecture in possible_models, \
+            '''Model Architecture should be one of:
+            {}
+            Received Architecture: {}'''.format(possible_models, 
+                                                self.architecture)
+
+        assert self.batch_size <= 4, \
+                '''BatchSize should be less than 4. Having a larger batch size
+                results in Memory Error of GPU. Received BatchSize: {}'''.\
+                    format(self.batch_size)
+
+        assert self.top_k <= len(self.use_labels), \
+                '''TopK must be less than length of UseLabels.
+                Received TopK : {}'''.format(self.top_k)
+            
+        print('All tests passed. All Config parameters are valid.')
+
+        
+
+
 if __name__ == '__main__':
 
+    ########################## get config
+    config = Config()
+    config.create_config('config.ini')
+    
     cc = ContainerClassifier()
-    cc.read_train_data(path='./annotated_data', resize_to=(224, 224))
+    
+    
+    ######################### training 
 
-    training from scratch
-    cc.train(model='resnet101', epochs=30, batch_size=4)
-    cc.save_model(name='resnet101_nopretrained_30epochs_224x224')
+    cc.read_train_data(path=config.train_data_folder_path, 
+                    resize_to=config.resize_to, 
+                    class_dict=config.class_dict, 
+                    use_labels=config.use_labels)
 
-    # uncomment if loading previously trained model
-    # cc.load_model('./models/container_classifier_v1_0_0.json',
-    #                 './models/container_classifier_v1_0_0.h5')
+    cc.train(model=config.architecture, 
+             epochs=config.epochs, 
+             batch_size=config.batch_size, 
+             optimizer=config.optimizer, 
+             summary=config.print_model_summary)
+    
+    cc.save_model(name=config.model_name, 
+                  path=config.save_to_dir)
+    
+    
+    
+    ######################### load pretrained
+    cc.load_model(json_path=config.load_from_dir+'.json', 
+                  weights_path=config.load_from_dir+'.h5')
 
-    # testing
-    cc.read_test_data(path='./test', resize_to=(224, 224))
+    
+    
+    ######################### testing
+    cc.read_test_data(path=config.test_data_folder_path, 
+                      resize_to=config.resize_to, 
+                      class_dict=config.class_dict, 
+                      use_labels=config.use_labels)
 
-    cc.test_model(output_dir='test_output')
+    cc.test_model(output_dir=config.test_output_dir, 
+                  top_k=config.top_k, 
+                  plot_outputs=config.plot_outputs)
+
+    
